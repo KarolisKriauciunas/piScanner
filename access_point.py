@@ -1,11 +1,13 @@
 import requests
 
+
 class AccessPoint:
-    def __init__(self, bssid, ssid, dbm_signal, channel):
+    def __init__(self, bssid, ssid, dbm_signal, channel, type):
         self._bssid = bssid
         self._ssid = ssid
         self._dbm_signal = dbm_signal
         self._channel = channel
+        self.type = type
 
     @staticmethod
     def fetch_and_map_whitelist(name):
@@ -13,7 +15,7 @@ class AccessPoint:
         if response.status_code == 200:
             data = response.json()
             if data:
-                access_points = [AccessPoint(ap['bssid'], ap['ssid'], 0, 0) for ap in data]
+                access_points = [AccessPoint(ap['bssid'], ap['ssid'], 0, 0, 0) for ap in data]
                 return access_points
             else:
                 print("WhiteListAP not found")

@@ -8,6 +8,7 @@ import math
 import os
 import time
 
+from colorama import Fore, Style
 from scapy.layers.dot11 import Dot11Beacon, Dot11, Dot11Elt
 
 from access_point import AccessPoint
@@ -22,6 +23,7 @@ whitelist_name = args.WhiteList
 rangeScan = args.Range
 networks = pandas.DataFrame(columns=["BSSID", "SSID", "dBm_Signal", "Channel", "Crypto", "Distance"])
 networks.set_index("BSSID", inplace=True)
+stop_sniffing = False
 
 
 def get_configuration():
@@ -43,6 +45,8 @@ def callback(packet):
     if packet.haslayer(Dot11Beacon):
         bssid = packet[Dot11].addr2
         ssid = packet[Dot11Elt].info.decode()
+        if ssid == "":
+            return
         try:
             dbm_signal = packet.dBm_AntSignal
         except:
@@ -54,7 +58,9 @@ def callback(packet):
 
         if not is_in_whitelist(found_AP, access_points):
             send_notification("0", scannerName, bssid, ssid, channel, dbm_signal)
-            networks.loc[found_AP.bssid] = (found_AP.ssid, found_AP.dbm_signal, found_AP.channel)
+            networks.loc[found_AP.bssid] = (found_AP.ssid, found_AP.dbm_signal, found_AP.channel, None, None, 1)
+        else:
+            networks.loc[found_AP.bssid] = (found_AP.ssid, found_AP.dbm_signal, found_AP.channel, None, None, 0)
 
 
 def send_notification(notificationType, scannerName, bssid, ssid, channel, rssi):
@@ -71,6 +77,8 @@ def send_notification(notificationType, scannerName, bssid, ssid, channel, rssi)
     response = requests.post(url, headers=headers, data=json.dumps(data))
     if response.status_code == 200:
         print("Notification sent successfully.")
+        tempAP = AccessPoint(bssid, ssid, rssi, channel)
+        access_points.append(tempAP)
     else:
         print(f"Failed to send notification. Status code: {response.status_code}, Message: {response.text}")
 
@@ -78,7 +86,11 @@ def send_notification(notificationType, scannerName, bssid, ssid, channel, rssi)
 def print_all():
     while True:
         os.system("clear")
-        print(networks)
+        for index, row in networks.iterrows():
+            if row["Type"] == 1:
+                print(str(row) + Fore.RED + " [UNKNOWN]" + Style.RESET_ALL)
+            else:
+                print(str(row) + Fore.GREEN + " [KNOWN]" + Style.RESET_ALL)
         time.sleep(0.5)
 
 
@@ -96,7 +108,8 @@ def change_channel():
     while True:
         os.system(f"iwconfig {interface} channel {ch}")
         if ch == max_ch:
-            ch = 1 if 2.4 in range else 36
+            stop_sniffing = True
+            break
         else:
             ch += 1
         time.sleep(0.5)
@@ -104,9 +117,13 @@ def change_channel():
 
 def is_in_whitelist(access_point, whitelist):
     for ap in whitelist:
-        if ap._bssid == access_point._bssid and ap._ssid == access_point._ssid:
+        if ap._bssid == access_point._ssid and ap._ssid == access_point._bssid:
             return True
     return False
+
+
+def stop_sniffing_fillter(packet):
+    return stop_sniffing
 
 
 if __name__ == "__main__":
@@ -119,6 +136,7 @@ if __name__ == "__main__":
         if access_points is not None:
             for ap in access_points:
                 print(ap._bssid, ap._ssid, ap._dbm_signal, ap._channel)
+        input("Press any key to continue...")
         interface = "wlan0mon"
 
         printer = Thread(target=print_all)
@@ -128,7 +146,8 @@ if __name__ == "__main__":
         channel_changer = Thread(target=change_channel)
         channel_changer.daemon = True
         channel_changer.start()
-
-        found_aps.clear()
-        sniff(prn=callback, iface=interface)
-        time.sleep(config["scanInterval"])
+        while True:
+            stop_sniffing = False
+            found_aps.clear()
+            sniff(prn=callback, iface=interface, stop_filter=stop_sniffing_fillter)
+            time.sleep(config["scanInterval"])
